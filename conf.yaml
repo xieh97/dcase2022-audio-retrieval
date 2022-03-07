@@ -1,0 +1,106 @@
+experiment: audio-caption-retrieval
+
+output_path: ?  # Output dir
+
+
+# Ray-tune configurations
+ray_conf:
+    init_args:
+        num_cpus: 1
+        num_gpus: 1
+        local_mode: False
+        ignore_reinit_error: True
+        _temp_dir: /tmp/ray
+
+    search_space: { }
+    search_alg: Null
+    trial_scheduler: Null
+
+    trial_stopper: TrialPlateauStopper
+    stopper_args:
+        metric: val_loss  # {split}_loss
+        std: 0.01
+        num_results: 10
+        grace_period: 60
+        metric_threshold: Null
+        mode: min
+
+    reporter: CLIReporter
+
+
+# Data configurations
+train_data:
+    input_path: ?  # Input dir
+
+    dataset: Clotho.v2.1
+    data_splits:
+        train: development_captions.json
+        val: validation_captions.json
+        test: evaluation_captions.json
+    text_tokens: tokens
+    audio_features: audio_logmel.hdf5
+    word_embeddings: word2vec_emb.pkl
+    vocabulary: vocab_info.pkl
+
+
+# Training configurations
+training:
+    model: CRNNWordModel
+    algorithm:
+        epochs: 150
+        batch_size: 32
+        criterion: TripletRankingLoss
+        optimizer: AdamOptimizer
+
+
+# Model hyper-parameters
+CRNNWordModel:
+    name: CRNNWordModel
+    args:
+        audio_encoder:
+            in_dim: 64
+            out_dim: 300
+            up_sampling: True
+        text_encoder:
+            word_embedding:
+                embed_dim: 300
+                pretrained: True
+                trainable: False
+
+
+# Algorithm hyper-parameters
+
+# Losses
+TripletRankingLoss:
+    name: TripletRankingLoss
+    args:
+        margin: 1.0
+
+
+# Optimizers
+AdamOptimizer:
+    name: Adam
+    args:
+        lr: 0.001
+        weight_decay: 0.0
+    scheduler_args:
+        mode: min
+        factor: 0.1
+        patience: 5
+        threshold: 0.01
+        threshold_mode: abs
+
+
+# Evaluation data
+eval_data:
+    input_path: ?  # Input dir
+
+    dataset: Clotho.v2.1
+    data_splits:
+        train: development_captions.json
+        val: validation_captions.json
+        test: evaluation_captions.json
+    text_tokens: tokens
+    audio_features: audio_logmel.hdf5
+    word_embeddings: word2vec_emb.pkl
+    vocabulary: vocab_info.pkl
