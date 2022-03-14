@@ -55,7 +55,7 @@ class QueryAudioDataset(Dataset):
         audio_feat = torch.as_tensor(self.audio_feature[str(item["fid"])][()])
         query = torch.as_tensor([self.vocabulary(token) for token in item[self.query_col]])
 
-        info = {"cid": item["cid"], "fid": item["fid"]}
+        info = {"cid": item["cid"], "fid": item["fid"], "fname": item["fname"], "caption": item["original"]}
 
         return audio_feat, query, info
 

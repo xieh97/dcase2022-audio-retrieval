@@ -1,6 +1,6 @@
-experiment: audio-caption-retrieval
+experiment: audio-retrieval
 
-output_path: ?  # Output dir
+output_path: "?"  # Output dir
 
 
 # Ray-tune configurations
@@ -30,7 +30,7 @@ ray_conf:
 
 # Data configurations
 train_data:
-    input_path: ?  # Input dir
+    input_path: "?"  # Input dir
 
     dataset: Clotho.v2.1
     data_splits:
@@ -93,7 +93,7 @@ AdamOptimizer:
 
 # Evaluation data
 eval_data:
-    input_path: ?  # Input dir
+    input_path: "?"  # Input dir
 
     dataset: Clotho.v2.1
     data_splits:

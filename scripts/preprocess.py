@@ -12,10 +12,7 @@ global_params = {
     "audio_splits": ["development", "validation", "evaluation"],
     "caption_files": ["clotho_captions_development.csv",
                       "clotho_captions_validation.csv",
-                      "clotho_captions_evaluation.csv"],
-    "metadata_files": ["clotho_metadata_development.csv",
-                       "clotho_metadata_validation.csv",
-                       "clotho_metadata_evaluation.csv"]
+                      "clotho_captions_evaluation.csv"]
 }
 
 # %% 1. Check audio clips
