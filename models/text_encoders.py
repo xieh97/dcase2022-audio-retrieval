@@ -2,50 +2,6 @@ import torch
 import torch.nn as nn
 
 
-class WordEmbedding(nn.Module):
-
-    def __init__(self, *args, **kwargs):
-        super(WordEmbedding, self).__init__()
-
-        self.args = args
-        self.kwargs = kwargs
-
-        self.embedding = nn.Embedding(kwargs["num_word"], kwargs["embed_dim"])
-
-        if kwargs.get("word_embeds", None) is not None:
-            self.load_pretrained_embedding(kwargs["word_embeds"])
-        else:
-            nn.init.kaiming_uniform_(self.embedding.weight)
-
-        for para in self.embedding.parameters():
-            para.requires_grad = kwargs.get("trainable", False)
-
-    def load_pretrained_embedding(self, weight):
-        assert weight.shape[0] == self.embedding.weight.size()[0], "vocabulary size mismatch!"
-
-        weight = torch.as_tensor(weight).float()
-        self.embedding.weight = nn.Parameter(weight)
-
-    def forward(self, queries, query_lens):
-        """
-        :param queries: tensor, (batch_size, query_max_len).
-        :param query_lens: list, [N_{1}, ..., N_{batch_size}].
-        :return: (batch_size, query_max_len, embed_dim).
-        """
-
-        query_lens = torch.as_tensor(query_lens)
-        batch_size, query_max = queries.size()
-
-        query_embeds = self.embedding(queries)
-
-        mask = torch.arange(query_max, device="cpu").repeat(batch_size).view(batch_size, query_max)
-        mask = (mask < query_lens.view(-1, 1)).to(query_embeds.device)
-
-        query_embeds = query_embeds * mask.unsqueeze(-1)
-
-        return query_embeds
-
-
 class WordEncoder(nn.Module):
 
     def __init__(self, *args, **kwargs):
@@ -54,34 +10,61 @@ class WordEncoder(nn.Module):
         self.args = args
         self.kwargs = kwargs
 
-        self.word_embedding = WordEmbedding(*args, **kwargs["word_embedding"])
+        self.embedding = nn.Embedding(kwargs["num_word"], kwargs["embed_dim"])
 
-    def forward(self, queries, query_lens):
+        if kwargs.get("word_embeds", None) is not None:
+            self.load_prior_embedding(kwargs["word_embeds"])
+        else:
+            nn.init.kaiming_uniform_(self.embedding.weight)
+
+        for param in self.embedding.parameters():
+            param.requires_grad = kwargs.get("trainable", False)
+
+    def load_prior_embedding(self, weight):
+        assert weight.shape[0] == self.embedding.weight.size()[0], "vocabulary size mismatch!"
+
+        weight = torch.as_tensor(weight).float()
+        self.embedding.weight = nn.Parameter(weight)
+
+    def forward(self, text_vecs, text_lens):
         """
-        :param queries: tensor, (batch_size, query_max_len).
-        :param query_lens: list, [N_{1}, ..., N_{batch_size}].
-        :return: (batch_size, embed_dim).
+        :param text_vecs: tensor, (batch_size, text_max_len).
+        :param text_lens: numpy 1D-array, (batch_size,).
+        :return: tensor, (batch_size, text_max_len, embed_dim).
         """
 
-        query_embeds = self.word_embedding(queries, query_lens)
+        text_lens = torch.as_tensor(text_lens)
+        batch_size, text_max_len = text_vecs.size()
 
-        query_embeds = torch.mean(query_embeds, dim=1, keepdim=False)
+        text_embeds = self.embedding(text_vecs)
 
-        return query_embeds
+        mask = torch.arange(text_max_len, device="cpu").repeat(batch_size).view(batch_size, text_max_len)
+        mask = (mask < text_lens.view(-1, 1)).to(text_embeds.device)
+
+        text_embeds = text_embeds * mask.unsqueeze(-1)
+
+        return text_embeds
 
 
-def init_weights(m):
-    if isinstance(m, (nn.Conv2d, nn.Conv1d)):
-        nn.init.kaiming_normal_(m.weight)
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0)
+class TextEncoder(nn.Module):
 
-    elif isinstance(m, nn.BatchNorm2d):
-        nn.init.constant_(m.weight, 1)
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0)
+    def __init__(self, *args, **kwargs):
+        super(TextEncoder, self).__init__()
 
-    if isinstance(m, nn.Linear):
-        nn.init.kaiming_uniform_(m.weight)
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0)
+        self.args = args
+        self.kwargs = kwargs
+
+        self.word_enc = WordEncoder(**kwargs["word_enc"])
+
+    def forward(self, text_vecs, text_lens):
+        """
+        :param text_vecs: tensor, (batch_size, text_max_len).
+        :param text_lens: numpy 1D-array, (batch_size,).
+        :return: tensor, (batch_size, embed_dim).
+        """
+
+        text_embeds = self.word_enc(text_vecs, text_lens)
+
+        text_embeds = torch.mean(text_embeds, dim=1, keepdim=False)
+
+        return text_embeds

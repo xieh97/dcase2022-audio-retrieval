@@ -1,24 +1,24 @@
-experiment: audio-retrieval
+trial_series: audio-caption-retrieval
 
-output_path: "?"  # Output dir
+trial_base: "?"  # Output dir
 
 
-# Ray-tune configurations
+# Configure ray-tune clusters
 ray_conf:
     init_args:
         num_cpus: 1
         num_gpus: 1
         local_mode: False
         ignore_reinit_error: True
-        _temp_dir: /tmp/ray
+        _temp_dir: "?"
 
     search_space: { }
-    search_alg: Null
+    search_algo: Null
     trial_scheduler: Null
 
     trial_stopper: TrialPlateauStopper
     stopper_args:
-        metric: val_loss  # {split}_loss
+        metric: val_loss
         std: 0.01
         num_results: 10
         grace_period: 60
@@ -28,79 +28,86 @@ ray_conf:
     reporter: CLIReporter
 
 
-# Data configurations
-train_data:
-    input_path: "?"  # Input dir
+# Configure training, validation, and evaluation data
+data_conf:
+    train_data: # training data
+        dataset: "?"
+        audio_data: development_audio_logmels.hdf5
+        caption_data: development_captions.json
+        text_vocab: vocab_info.pkl
+        word_embeds: word2vec_embeds.pkl
 
-    dataset: Clotho.v2.1
-    data_splits:
-        train: development_captions.json
-        val: validation_captions.json
-        test: evaluation_captions.json
-    text_tokens: tokens
-    audio_features: audio_logmel.hdf5
-    word_embeddings: word2vec_emb.pkl
-    vocabulary: vocab_info.pkl
+    val_data: # validation data
+        dataset: "?"
+        audio_data: validation_audio_logmels.hdf5
+        caption_data: validation_captions.json
+        text_vocab: vocab_info.pkl
+        word_embeds: word2vec_embeds.pkl
+
+    eval_data: # evaluation data
+        dataset: "?"
+        audio_data: evaluation_audio_logmels.hdf5
+        caption_data: evaluation_captions.json
+        text_vocab: vocab_info.pkl
+        word_embeds: word2vec_embeds.pkl
+
+#    test_data: # testing data
+#        dataset: "?"
+#        audio_data: test_audio_logmels.hdf5
+#        caption_data: test_captions.json
+#        text_vocab: vocab_info.pkl
+#        word_embeds: word2vec_embeds.pkl
 
 
-# Training configurations
-training:
+# Configure hyper-parameters
+param_conf:
+    epochs: 150
+    batch_size: 32
     model: CRNNWordModel
-    algorithm:
-        epochs: 150
-        batch_size: 32
-        criterion: TripletRankingLoss
-        optimizer: AdamOptimizer
+    criterion: TripletRankingLoss
+    optimizer: AdamOptimizer
+    lr_scheduler: ReduceLROnPlateau
 
 
-# Model hyper-parameters
+# Model definitions
 CRNNWordModel:
     name: CRNNWordModel
-    args:
-        audio_encoder:
-            in_dim: 64
-            out_dim: 300
-            up_sampling: True
-        text_encoder:
-            word_embedding:
-                embed_dim: 300
-                pretrained: True
-                trainable: False
+
+    audio_enc: # audio encoder branch
+        in_dim: 64
+        out_dim: 300
+        up_sampling: linear
+
+    text_enc: # text encoder branch
+        word_enc: # word encoder
+            init: prior # rand or prior
+            embed_dim: 300
+            trainable: False
+
+    out_normd: L2
 
 
-# Algorithm hyper-parameters
-
-# Losses
+# Loss definitions
 TripletRankingLoss:
     name: TripletRankingLoss
     args:
         margin: 1.0
 
 
-# Optimizers
+# Optimizer definitions
 AdamOptimizer:
     name: Adam
     args:
         lr: 0.001
         weight_decay: 0.0
-    scheduler_args:
+
+
+# Learning rate scheduler definitions
+ReduceLROnPlateau:
+    name: ReduceLROnPlateau
+    args:
         mode: min
         factor: 0.1
         patience: 5
         threshold: 0.01
         threshold_mode: abs
-
-
-# Evaluation data
-eval_data:
-    input_path: "?"  # Input dir
-
-    dataset: Clotho.v2.1
-    data_splits:
-        train: development_captions.json
-        val: validation_captions.json
-        test: evaluation_captions.json
-    text_tokens: tokens
-    audio_features: audio_logmel.hdf5
-    word_embeddings: word2vec_emb.pkl
-    vocabulary: vocab_info.pkl

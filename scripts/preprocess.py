@@ -1,3 +1,4 @@
+import base64
 import glob
 import os
 import pickle
@@ -5,78 +6,75 @@ import pickle
 import pandas as pd
 from mutagen.wave import WAVE
 
+from scripts import global_params
 from utils import word_utils
-
-global_params = {
-    "dataset_dir": "~/Clotho.v2.1",
-    "audio_splits": ["development", "validation", "evaluation"],
-    "caption_files": ["clotho_captions_development.csv",
-                      "clotho_captions_validation.csv",
-                      "clotho_captions_evaluation.csv"]
-}
 
 # %% 1. Check audio clips
 
-fid_count = 0
 audio_fids, audio_fnames, audio_durations = {}, {}, {}
 
 for split in global_params["audio_splits"]:
-    fids, fnames, durations = {}, [], []
 
-    for fpath in glob.glob(r"{}/*.wav".format(os.path.join(global_params["dataset_dir"], split))):
+    fid_fnames, fnames, durations = {}, [], []
+
+    audio_dir = os.path.join(global_params["dataset_dir"], split)
+
+    for fpath in glob.glob(r"{}/*.wav".format(audio_dir)):
         try:
             clip = WAVE(fpath)
 
             if clip.info.length > 0.0:
-                fid_count += 1
+                fid = base64.urlsafe_b64encode(os.urandom(8)).decode("ascii")
                 fname = os.path.basename(fpath)
 
-                fids[fname] = fid_count
+                fid_fnames[fid] = fname
                 fnames.append(fname)
                 durations.append(clip.info.length)
         except:
-            print("Error audio file: {}.".format(fpath))
-    audio_fids[split] = fids
+            print("Error audio file:", fpath)
+
+    assert len(fid_fnames) == len(fnames)
+
+    audio_fids[split] = fid_fnames
     audio_fnames[split] = fnames
     audio_durations[split] = durations
 
 # Save audio info
 with open(os.path.join(global_params["dataset_dir"], "audio_info.pkl"), "wb") as store:
     pickle.dump({"audio_fids": audio_fids, "audio_fnames": audio_fnames, "audio_durations": audio_durations}, store)
-print("Saved audio info")
+print("Save audio info")
 
 # %% 2. Load and preprocess captions
 
-cid_count = 0
+for split, cap_fname in zip(global_params["audio_splits"], global_params["caption_files"]):
 
-for split, caption_file in zip(global_params["audio_splits"], global_params["caption_files"]):
-    captions = pd.read_csv(os.path.join(global_params["dataset_dir"], caption_file))
-    split_fids = audio_fids[split]
+    fid_fnames = audio_fids[split]
+    fname_fids = {fid_fnames[fid]: fid for fid in fid_fnames}
 
-    audio_captions = []
-    for i in captions.index:
-        fname = captions.iloc[i].file_name.strip()
-        c1 = captions.iloc[i].caption_1
-        c2 = captions.iloc[i].caption_2
-        c3 = captions.iloc[i].caption_3
-        c4 = captions.iloc[i].caption_4
-        c5 = captions.iloc[i].caption_5
+    cap_fpath = os.path.join(global_params["dataset_dir"], cap_fname)
+    cap_data = pd.read_csv(cap_fpath)
 
-        fid = split_fids[fname]
+    cap_rows = []
 
-        for cap in [c1, c2, c3, c4, c5]:
-            cid_count += 1
+    for i in cap_data.index:
+        fname = cap_data.iloc[i].file_name.strip()
+        cap_list = [cap_data.iloc[i].get(key) for key in cap_data.columns if key.startswith("caption")]
 
-            print(split, cid_count, fid, cap)
+        fid = fname_fids[fname]
+
+        for cap in cap_list:
+            cid = base64.urlsafe_b64encode(os.urandom(8)).decode("ascii")
 
             text, words = word_utils.clean_text(cap)
 
             # cid, fid, fname, original, caption, tokens
-            audio_captions.append([cid_count, fid, fname, cap, text, words])
+            cap_rows.append([cid, fid, fname, cap, text, words])
 
-    audio_captions = pd.DataFrame(data=audio_captions, columns=["cid", "fid", "fname", "original", "caption", "tokens"])
-    audio_captions.to_json(os.path.join(global_params["dataset_dir"], "{}_captions.json".format(split)))
-    print("Saved", "{}_captions.json".format(split))
+    cap_rows = pd.DataFrame(data=cap_rows, columns=["cid", "fid", "fname", "original", "text", "tokens"])
+
+    cap_fpath = os.path.join(global_params["dataset_dir"], f"{split}_captions.json")
+    cap_rows.to_json(cap_fpath)
+    print("Save", cap_fpath)
 
 # %% 3. Gather data statistics
 
@@ -89,14 +87,18 @@ word_bags = {}
 split_infos = {}
 
 for split in global_params["audio_splits"]:
-    captions = pd.read_json(os.path.join(global_params["dataset_dir"], "{}_captions.json".format(split)))
-    split_fids = audio_fids[split]
 
-    num_clips = len(split_fids)
-    num_captions = captions.caption.size
+    fid_fnames = audio_fids[split]
+    fname_fids = {fid_fnames[fid]: fid for fid in fid_fnames}
+
+    cap_fpath = os.path.join(global_params["dataset_dir"], f"{split}_captions.json")
+    cap_data = pd.read_json(cap_fpath)
+
+    num_clips = len(fid_fnames)
+    num_captions = cap_data.cid.size
 
     bag = []
-    for tokens in captions["tokens"]:
+    for tokens in cap_data["tokens"]:
         bag.extend(tokens)
         vocabulary = vocabulary.union(tokens)
 
@@ -115,4 +117,4 @@ with open(os.path.join(global_params["dataset_dir"], "vocab_info.pkl"), "wb") as
         "word_bags": word_bags,
         "split_infos": split_infos
     }, store)
-print("Saved vocabulary info")
+print("Save vocabulary info")

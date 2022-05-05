@@ -6,6 +6,8 @@ import h5py
 import librosa
 import numpy as np
 
+from scripts import global_params
+
 
 def log_mel_spectrogram(y,
                         sample_rate=44100,
@@ -37,45 +39,34 @@ def log_mel_spectrogram(y,
     return np.log(mel_spectrogram + log_offset)
 
 
-def extract_log_mel(params):
-    output_file = os.path.join(params["dataset_dir"], params["audio_feats"])
-
-    with h5py.File(output_file, "w") as feature_store:
-        for split in params["audio_splits"]:
-
-            subset_dir = os.path.join(params["dataset_dir"], split)
-            print(subset_dir)
-
-            for fpath in glob.glob("{}/*.wav".format(subset_dir)):
-                try:
-                    fname = os.path.basename(fpath)
-                    fid = global_params["audio_fids"][split][fname]
-
-                    y, sr = librosa.load(fpath, sr=None, mono=True)
-                    log_mel = log_mel_spectrogram(y=y, sample_rate=sr, window_length_secs=0.040,
-                                                  hop_length_secs=0.020, num_mels=64,
-                                                  log_offset=np.spacing(1))
-
-                    feat = np.vstack(log_mel).transpose()  # [Time, Mel]
-
-                    feature_store[str(fid)] = feat
-                    print(fid)
-                except:
-                    print("Error file: {}.".format(fpath))
-
-
-#
-# %% Pre-computed stuff
-#
-
-global_params = {
-    "dataset_dir": "~/Clotho.v2.1",
-    "audio_splits": ["development", "validation", "evaluation"],
-    "audio_feats": "audio_logmel.hdf5"
-}
+# %%
 
 with open(os.path.join(global_params["dataset_dir"], "audio_info.pkl"), "rb") as store:
-    global_params["audio_fids"] = pickle.load(store)["audio_fids"]
+    audio_fids = pickle.load(store)["audio_fids"]
 
-# Extract log mel features
-extract_log_mel(global_params)
+for split in global_params["audio_splits"]:
+
+    fid_fnames = audio_fids[split]
+    fname_fids = {fid_fnames[fid]: fid for fid in fid_fnames}
+
+    audio_dir = os.path.join(global_params["dataset_dir"], split)
+    audio_fpath = os.path.join(global_params["dataset_dir"], f"{split}_audio_logmels.hdf5")
+
+    with h5py.File(audio_fpath, "w") as stream:
+
+        for fpath in glob.glob(r"{}/*.wav".format(audio_dir)):
+            try:
+                fname = os.path.basename(fpath)
+                fid = fname_fids[fname]
+
+                y, sr = librosa.load(fpath, sr=None, mono=True)
+                log_mel = log_mel_spectrogram(y=y, sample_rate=sr, window_length_secs=0.040,
+                                              hop_length_secs=0.020, num_mels=64,
+                                              log_offset=np.spacing(1))
+
+                stream[fid] = np.vstack(log_mel).transpose()  # [Time, Mel]
+                print(fid, fname)
+            except:
+                print("Error audio file:", fpath)
+
+    print("Save", audio_fpath)

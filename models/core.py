@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch.nn.functional as F
 
 from models import audio_encoders, text_encoders
 
@@ -11,21 +12,36 @@ class CRNNWordModel(nn.Module):
         self.args = args
         self.kwargs = kwargs
 
-        self.audio_encoder = audio_encoders.CRNNEncoder(**kwargs["audio_encoder"])
+        self.audio_enc = audio_encoders.CRNNEncoder(**kwargs["audio_enc"])
 
-        self.text_encoder = text_encoders.WordEncoder(**kwargs["text_encoder"])
+        self.text_enc = text_encoders.TextEncoder(**kwargs["text_enc"])
 
-    def forward(self, audio_feats, queries, query_lens):
+    def forward(self, audio_vecs, text_vecs, text_lens):
         """
-        :param audio_feats: tensor, (batch_size, time_steps, Mel_bands).
-        :param queries: tensor, (batch_size, query_max_len).
-        :param query_lens: list, [N_{1}, ..., N_{batch_size}].
-        :return: (batch_size, embed_dim), (batch_size, embed_dim).
+        :param audio_vecs: tensor, (batch_size, time_steps, Mel_bands).
+        :param text_vecs: tensor, (batch_size, text_max_len).
+        :param text_lens: numpy 1D-array, (batch_size,).
         """
 
-        audio_embeds = self.audio_encoder(audio_feats)
+        audio_embeds = self.audio_branch(audio_vecs)
 
-        query_embeds = self.text_encoder(queries, query_lens)
+        text_embeds = self.text_branch(text_vecs, text_lens)
 
-        # audio_embeds: [N, E]    query_embeds: [N, E]
-        return audio_embeds, query_embeds
+        # audio_embeds: [N, E]    text_embeds: [N, E]
+        return audio_embeds, text_embeds
+
+    def audio_branch(self, audio_vecs):
+        audio_embeds = self.audio_enc(audio_vecs)
+
+        if self.kwargs.get("out_normd", None) == "L2":
+            audio_embeds = F.normalize(audio_embeds, p=2.0, dim=-1)
+
+        return audio_embeds
+
+    def text_branch(self, text_vecs, text_lens):
+        text_embeds = self.text_enc(text_vecs, text_lens)
+
+        if self.kwargs.get("out_normd", None) == "L2":
+            text_embeds = F.normalize(text_embeds, p=2.0, dim=-1)
+
+        return text_embeds

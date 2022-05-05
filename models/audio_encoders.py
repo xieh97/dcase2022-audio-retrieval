@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from models import init_weights
+
 
 class CNNModule(nn.Module):
 
@@ -86,26 +88,10 @@ class CRNNEncoder(nn.Module):
         x = self.cnn(x)
         x, _ = self.gru(x)
 
-        if self.kwargs.get("up_sampling", False):
-            x = F.interpolate(x.transpose(1, 2), time, mode="linear", align_corners=False).transpose(1, 2)
+        if self.kwargs.get("up_sampling", None) is not None:
+            x = F.interpolate(x.transpose(1, 2), time, mode=self.kwargs["up_sampling"],
+                              align_corners=False).transpose(1, 2)
 
         x = torch.mean(x, dim=1, keepdim=False)
 
         return x
-
-
-def init_weights(m):
-    if isinstance(m, (nn.Conv2d, nn.Conv1d)):
-        nn.init.kaiming_normal_(m.weight)
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0)
-
-    elif isinstance(m, nn.BatchNorm2d):
-        nn.init.constant_(m.weight, 1)
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0)
-
-    if isinstance(m, nn.Linear):
-        nn.init.kaiming_uniform_(m.weight)
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0)

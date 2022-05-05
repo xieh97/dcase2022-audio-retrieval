@@ -1,104 +1,150 @@
+import dbm
 import os
+import shelve
+from dbm import dumb
 
+import numpy as np
 import pandas as pd
 import torch
 
-from utils import data_utils, model_utils
+from utils import criterion_utils, data_utils, model_utils
+
+dbm._defaultmod = dumb
+dbm._modules = {"dbm.dumb": dumb}
 
 
-def transform(model, dataset, index, device=None):
-    audio, query, info = dataset[index]
+def measure(rid_list, rid2pred_sims, rid2pred_pids, pid2rid):
+    # Retrieval metrics over samples (audio or caption instances)
+    rid2pid_R1, rid2pid_R5, rid2pid_R10, rid2pid_mAP = [], [], [], []
 
-    audio = torch.unsqueeze(audio, dim=0).to(device=device)
-    query = torch.unsqueeze(query, dim=0).to(device=device)
+    for rind, rid in enumerate(rid_list):
+        preds = rid2pred_sims[rind]
+        target = np.array([((pid2rid.get(pid, None) == rid) or (pid2rid.get(rid, None) == pid))
+                           for pid in rid2pred_pids[rind]])
 
-    audio_emb, query_emb = model(audio, query, [query.size(-1)])
+        desc_indices = np.argsort(preds, axis=-1)[::-1]
+        target = np.take_along_axis(arr=target, indices=desc_indices, axis=-1)
 
-    audio_emb = torch.squeeze(audio_emb, dim=0).to(device=device)
-    query_emb = torch.squeeze(query_emb, dim=0).to(device=device)
+        recall_at_1 = np.sum(target[:1], dtype=float) / np.sum(target, dtype=float)
+        recall_at_5 = np.sum(target[:5], dtype=float) / np.sum(target, dtype=float)
+        recall_at_10 = np.sum(target[:10], dtype=float) / np.sum(target, dtype=float)
 
-    return audio_emb, query_emb, info
+        target = target[:10]
+        positions = np.arange(1, len(target) + 1, dtype=float)[target > 0]
+        avg_precision = np.divide(np.arange(1, len(positions) + 1, dtype=float),
+                                  positions).mean() if len(positions) > 0 else 0.0
 
+        rid2pid_R1.append(recall_at_1)
+        rid2pid_R5.append(recall_at_5)
+        rid2pid_R10.append(recall_at_10)
+        rid2pid_mAP.append(avg_precision)
 
-def audio_retrieval(model, caption_dataset, K=10):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device=device)
-
-    model.eval()
-
-    with torch.no_grad():
-
-        fid_embs, fid_fnames = {}, {}
-        cid_embs, cid_infos = {}, {}
-
-        # Encode audio signals and captions
-        for cap_ind in range(len(caption_dataset)):
-            audio_emb, query_emb, info = transform(model, caption_dataset, cap_ind, device)
-
-            fid_embs[info["fid"]] = audio_emb
-            fid_fnames[info["fid"]] = info["fname"]
-
-            cid_embs[info["cid"]] = query_emb
-            cid_infos[info["cid"]] = info
-
-        # Stack audio embeddings
-        audio_embs, fnames = [], []
-        for fid in fid_embs:
-            audio_embs.append(fid_embs[fid])
-            fnames.append(fid_fnames[fid])
-
-        audio_embs = torch.vstack(audio_embs)  # dim [N, E]
-
-        # Compute similarities
-        output_rows = []
-        for cid in cid_embs:
-
-            sims = torch.mm(torch.vstack([cid_embs[cid]]), audio_embs.T).flatten().to(device=device)
-
-            sorted_idx = torch.argsort(sims, dim=-1, descending=True)
-
-            csv_row = [cid_infos[cid]["caption"]]  # caption
-            for idx in sorted_idx[:K]:  # top-K retrieved fnames
-                csv_row.append(fnames[idx])
-
-            output_rows.append(csv_row)
-
-        return output_rows
+    print("R1: {:.3f}".format(np.mean(rid2pid_R1)),
+          "R5: {:.3f}".format(np.mean(rid2pid_R5)),
+          "R10: {:.3f}".format(np.mean(rid2pid_R10)),
+          "mAP10: {:.3f}".format(np.mean(rid2pid_mAP)), end="\n")
 
 
-def eval_checkpoint(config, checkpoint_dir):
-    # Load config
-    training_config = config["training"]
+def predict(conf, ckp_fpath):
+    data_conf = conf["data_conf"]
+    param_conf = conf["param_conf"]
+    model_params = conf[param_conf["model"]]
 
-    # Load evaluation
-    caption_datasets, vocabulary = data_utils.load_data(config["eval_data"])
+    # Load data
+    eval_ds = data_utils.load_data(data_conf["eval_data"])
 
-    # Initialize a model instance
-    model_config = config[training_config["model"]]
-    model = model_utils.get_model(model_config, vocabulary)
+    # Restore model checkpoint
+    model = model_utils.get_model(model_params, eval_ds.text_vocab)
+    model = model_utils.restore(model, ckp_fpath)
     print(model)
 
-    # Restore model states
-    model = model_utils.restore(model, checkpoint_dir)
     model.eval()
 
-    # Retrieve audio files for evaluation captions
-    for split in ["test"]:
-        output = audio_retrieval(model, caption_datasets[split], K=10)
+    # Retrieve audio files for captions
+    for name, ds in zip(["eval"], [eval_ds]):
 
-        csv_fields = ["caption",
-                      "file_name_1",
-                      "file_name_2",
-                      "file_name_3",
-                      "file_name_4",
-                      "file_name_5",
-                      "file_name_6",
-                      "file_name_7",
-                      "file_name_8",
-                      "file_name_9",
-                      "file_name_10"]
+        # Process captions
+        cid2fid, cid2caption, cap2vec, fid2fname = {}, {}, {}, {}
 
-        output = pd.DataFrame(data=output, columns=csv_fields)
-        output.to_csv(os.path.join(checkpoint_dir, "{}.output.csv".format(split)),
-                      index=False)
-        print("Saved", "{}.output.csv".format(split))
+        for idx in ds.text_data.index:
+            item = ds.text_data.iloc[idx]
+
+            text_len = len(item[ds.text_col])
+
+            text_vec = np.array([ds.text_vocab(token) for token in item[ds.text_col]])
+            text_vec = torch.as_tensor(text_vec)
+            text_vec = torch.unsqueeze(text_vec, dim=0)
+
+            cid2fid[item["cid"]] = item["fid"]
+            cid2caption[item["cid"]] = item["original"]
+            cap2vec[item["cid"]] = (text_vec, text_len)
+            fid2fname[item["fid"]] = item["fname"]
+
+        # Compute pairwise cross-modal similarities
+        sim_fpath = os.path.join(ckp_fpath, f"{name}_xmodal_Sim.db")
+        with shelve.open(filename=sim_fpath, flag="n", protocol=2) as stream:
+            for ref_fid in ds.text_data["fid"].unique():
+                group_sims = {}
+
+                # Encode audio data
+                audio_vec = torch.as_tensor(ds.audio_data[ref_fid][()])
+                audio_vec = torch.unsqueeze(audio_vec, dim=0)
+                audio_embed = model.audio_branch(audio_vec)[0]
+
+                for cand_cid in cap2vec:
+                    # Encode text data
+                    text_vec, text_len = cap2vec[cand_cid]
+                    text_embed = model.text_branch(text_vec, [text_len])[0]
+
+                    xmodal_S = criterion_utils.score(audio_embed, text_embed)
+                    group_sims[cand_cid] = xmodal_S.item()
+
+                stream[ref_fid] = group_sims
+        print("Save", sim_fpath)
+
+        # Compute retrieval metrics
+        with shelve.open(filename=sim_fpath, flag="r", protocol=2) as stream:
+            cid2predA_sims, cid2predA_fids = {}, {}  # Caption2Audio retrieval
+
+            for fid in stream:
+                group_sims = stream[fid]
+                for cid in group_sims:
+                    if cid2predA_sims.get(cid, None) is None:
+                        cid2predA_sims[cid] = [group_sims[cid]]
+                        cid2predA_fids[cid] = [fid]
+                    else:
+                        cid2predA_sims[cid].append(group_sims[cid])
+                        cid2predA_fids[cid].append(fid)
+
+            cid_list = [cid for cid in cid2predA_sims]
+            cid2predA_sims = [cid2predA_sims[cid] for cid in cid_list]
+            cid2predA_fids = [cid2predA_fids[cid] for cid in cid_list]
+
+            print("Caption2Audio retrieval")
+            measure(cid_list, cid2predA_sims, cid2predA_fids, cid2fid)
+
+            # Output csv files
+            predA_rows = []
+
+            sorted_indexes = np.argsort(cid2predA_sims, axis=-1)
+
+            for cind, cid in enumerate(cid_list):
+
+                predA_fids = [cid2predA_fids[cind][find] for find in sorted_indexes[cind][::-1]]
+
+                cid_refA, cid_predA = [cid2caption[cid]], [cid2caption[cid]]
+
+                for fid in predA_fids:
+                    cid_predA.append(fid2fname[fid])
+                    if cid2fid[cid] == fid:
+                        cid_refA.append(fid2fname[fid])
+
+                predA_rows.append(cid_predA[:11])
+
+            predA_rows = pd.DataFrame(data=predA_rows,
+                                      columns=["caption", "file_name_1", "file_name_2",
+                                               "file_name_3", "file_name_4", "file_name_5", "file_name_6",
+                                               "file_name_7", "file_name_8", "file_name_9", "file_name_10"])
+            predA_fpath = os.path.join(ckp_fpath, f"{name}.output.csv")
+            predA_rows.to_csv(predA_fpath, index=False)
+            print("Save", predA_fpath, end="\n\n")

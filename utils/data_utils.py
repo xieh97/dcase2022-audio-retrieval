@@ -25,6 +25,12 @@ class Vocabulary(object):
             self.idx2word[self.idx] = word
             self.idx += 1
 
+    def get_word(self, idx):
+        return self.idx2word.get(idx, None)
+
+    def get_vec(self, word):
+        return self.word2vec.get(word, None)
+
     def get_weights(self):
         for idx in range(self.idx):
             if self.weights is None:
@@ -41,49 +47,58 @@ class Vocabulary(object):
         return len(self.word2idx)
 
 
-class QueryAudioDataset(Dataset):
+class AudioTextDataset(Dataset):
 
-    def __init__(self, audio_feature, data_df, query_col, vocabulary):
-        self.audio_feature = audio_feature
-        self.data_df = data_df
-        self.query_col = query_col
-        self.vocabulary = vocabulary
+    def __init__(self, **kwargs):
+        self.audio_data = kwargs["audio_data"]
+
+        self.text_data = kwargs["text_data"]
+        self.text_col = kwargs["text_col"]
+        self.text_vocab = kwargs["text_vocab"]
+
+        self.win_shift = kwargs["win_shift"]
+
+        self.kwargs = kwargs  # parameters
 
     def __getitem__(self, index):
-        item = self.data_df.iloc[index]
+        item = self.text_data.iloc[index]
 
-        audio_feat = torch.as_tensor(self.audio_feature[str(item["fid"])][()])
-        query = torch.as_tensor([self.vocabulary(token) for token in item[self.query_col]])
+        audio_vec = torch.as_tensor(self.audio_data[item["fid"]][()])
+        text_vec = torch.as_tensor([self.text_vocab(token) for token in item[self.text_col]])
 
-        info = {"cid": item["cid"], "fid": item["fid"], "fname": item["fname"], "caption": item["original"]}
+        add_info = {  # additional info
+            "cid": item["cid"],
+            "fid": item["fid"],
+            "fname": item["fname"],
+            "caption": item["original"]
+        }
 
-        return audio_feat, query, info
+        return audio_vec, text_vec, add_info
 
     def __len__(self):
-        return len(self.data_df)
+        return len(self.text_data)
 
 
 def collate_fn(data_batch):
     """
-    :param data_batch: a list of tensor tuples (audio_feat, query, info).
-    :return:
+    :param data_batch: a list of tuples (audio_vec, text_vec, add_info).
     """
-    audio_feat_batch = []
-    query_batch = []
-    info_batch = []
 
-    for a, q, i in data_batch:
-        audio_feat_batch.append(a)
-        query_batch.append(q)
-        info_batch.append(i)
+    audio_vecs, text_vecs, add_infos = [], [], []
 
-    audio_feat_batch, audio_feat_lens = pad_tensors(audio_feat_batch)
-    query_batch, query_lens = pad_tensors(query_batch)
+    for a, t, i in data_batch:
+        audio_vecs.append(a)
+        text_vecs.append(t)
+        add_infos.append(i)
 
-    return audio_feat_batch.float(), audio_feat_lens, query_batch.long(), query_lens, info_batch
+    audio_vecs, audio_lens = pad_tensors(audio_vecs, dtype=torch.float)
+    text_vecs, text_lens = pad_tensors(text_vecs, dtype=torch.long)
+    # audio_labels, _ = pad_tensors(audio_labels, dtype=torch.float)
+
+    return audio_vecs, audio_lens, text_vecs, text_lens, add_infos
 
 
-def pad_tensors(tensor_list):
+def pad_tensors(tensor_list, dtype=torch.float):
     tensor_lens = [tensor.shape for tensor in tensor_list]
 
     dim_max_lens = tuple(np.max(tensor_lens, axis=0))
@@ -95,36 +110,46 @@ def pad_tensors(tensor_list):
         end = tensor_lens[i]
         padded_tensor[i, :end] = t[:end]
 
-    return padded_tensor, tensor_lens
+    return padded_tensor.to(dtype), tensor_lens
 
 
-def load_data(config):
-    # Load audio features
-    feats_path = os.path.join(config["input_path"], config["audio_features"])
-    audio_feats = h5py.File(feats_path, "r")
-    print("Load", feats_path)
+def load_data(conf):
+    kwargs = {}
 
-    # Load pretrained word embeddings
-    emb_path = os.path.join(config["input_path"], config["word_embeddings"])
-    with open(emb_path, "rb") as emb_reader:
-        word_vectors = pickle.load(emb_reader)
-    print("Load", emb_path)
+    # Load audio data
+    audio_fpath = os.path.join(conf["dataset"], conf["audio_data"])
+    audio_data = h5py.File(audio_fpath, "r")
+    print("Load", audio_fpath)
 
-    # Construct vocabulary
-    vocabulary = Vocabulary()
-    for word in word_vectors:
-        if len(vocabulary) == 0:
-            vocabulary.add_word("<pad>", np.zeros_like(word_vectors[word]))
-        vocabulary.add_word(word, word_vectors[word])
+    kwargs["audio_data"] = audio_data
 
-    # Load data splits
-    text_datasets = {}
-    for split in ["train", "val", "test"]:
-        json_path = os.path.join(config["input_path"], config["data_splits"][split])
-        df = pd.read_json(json_path)
-        print("Load", json_path)
+    # Load caption data
+    caption_fpath = os.path.join(conf["dataset"], conf["caption_data"])
+    caption_data = pd.read_json(caption_fpath)
+    print("Load", caption_fpath)
 
-        dataset = QueryAudioDataset(audio_feats, df, config["text_tokens"], vocabulary)
-        text_datasets[split] = dataset
+    kwargs["text_data"] = caption_data
 
-    return text_datasets, vocabulary
+    # Load word embeddings
+    embed_fpath = os.path.join(conf["dataset"], conf["word_embeds"])
+    with open(embed_fpath, "rb") as stream:
+        word_embeds = pickle.load(stream)
+    print("Load", embed_fpath)
+
+    # Build vocabulary
+    text_vocab = Vocabulary()
+    for word in word_embeds:
+        if len(text_vocab) == 0:
+            text_vocab.add_word("<pad>", np.zeros_like(word_embeds[word]))
+        text_vocab.add_word(word, word_embeds[word])
+
+    kwargs["text_vocab"] = text_vocab
+
+    # Add additional parameters
+    kwargs["text_col"] = "tokens"
+    kwargs["win_shift"] = 0.02
+
+    # Enclose dataset
+    dataset = AudioTextDataset(**kwargs)
+
+    return dataset

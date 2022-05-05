@@ -6,60 +6,59 @@ import torch.nn as nn
 class TripletRankingLoss(nn.Module):
 
     def __init__(self, margin=1.0):
-        super().__init__()
+        super(TripletRankingLoss, self).__init__()
 
         self.margin = margin
 
-    def forward(self, audio_embeds, query_embeds, infos):
+    def forward(self, audio_embeds, text_embeds, add_infos):
         """
         :param audio_embeds: tensor, (N, E).
-        :param query_embeds: tensor, (N, E).
-        :param infos: list of audio infos.
+        :param text_embeds: tensor, (N, E).
+        :param add_infos: list of audio-text infos.
         :return:
         """
         N = audio_embeds.size(0)
 
-        # Computes the triplet margin ranking loss for each anchor audio/query pair.
-        # The impostor audio/query is randomly sampled from the mini-batch.
         loss = torch.tensor(0., device=audio_embeds.device, requires_grad=True)
 
+        # Computes the triplet margin ranking loss for each anchor audio/text pair.
+        # The impostor audio/text is randomly sampled from the mini-batch.
         for i in range(N):
-            A_imp_idx = i
-            while infos[A_imp_idx]["fid"] == infos[i]["fid"]:
-                A_imp_idx = np.random.randint(0, N)
 
-            Q_imp_idx = i
-            while infos[Q_imp_idx]["fid"] == infos[i]["fid"]:
-                Q_imp_idx = np.random.randint(0, N)
+            a = i  # index of imposter audio
+            while add_infos[a]["fid"] == add_infos[i]["fid"]:
+                a = np.random.randint(0, N)
 
-            anchor_score = score(audio_embeds[i], query_embeds[i])
+            t = i  # index of imposter text
+            while add_infos[t]["fid"] == add_infos[i]["fid"] or a == t:
+                t = np.random.randint(0, N)
 
-            A_imp_score = score(audio_embeds[A_imp_idx], query_embeds[i])
+            S_ii = score(audio_embeds[i], text_embeds[i])
+            S_ai = score(audio_embeds[a], text_embeds[i])
+            S_it = score(audio_embeds[i], text_embeds[t])
 
-            Q_imp_score = score(audio_embeds[i], query_embeds[Q_imp_idx])
+            L_ai = S_ai - S_ii + self.margin
+            if (L_ai.data > 0.).all():
+                loss = loss + L_ai
 
-            A2Q_diff = self.margin + Q_imp_score - anchor_score
-            if (A2Q_diff.data > 0.).all():
-                loss = loss + A2Q_diff
-
-            Q2A_diff = self.margin + A_imp_score - anchor_score
-            if (Q2A_diff.data > 0.).all():
-                loss = loss + Q2A_diff
+            L_it = S_it - S_ii + self.margin
+            if (L_it.data > 0.).all():
+                loss = loss + L_it
 
         loss = loss / N
 
         return loss
 
 
-def score(audio_embed, query_embed):
+def score(audio_embed, text_embed):
     """
-    Compute an audio-query score.
+    Compute an audio-text score.
 
     :param audio_embed: tensor, (E, ).
-    :param query_embed: tensor, (E, ).
+    :param text_embed: tensor, (E, ).
     :return: similarity score: tensor, (1, ).
     """
 
-    sim = torch.dot(audio_embed, query_embed)
+    sim = torch.dot(audio_embed, text_embed)
 
     return sim

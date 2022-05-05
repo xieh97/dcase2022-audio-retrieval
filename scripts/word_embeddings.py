@@ -3,48 +3,46 @@ import pickle
 
 import numpy as np
 
+from scripts import global_params
 from utils import word_utils
 
-global_params = {
-    "dataset_dir": "~/Clotho.v2.1",
-    "audio_splits": ["development", "validation", "evaluation"],
-}
+# %% Collect pre-trained word embeddings
 
-word_embs = {}
-emb_matrix, emb_shape = None, None
+word_embeds = {}
+embed_mat, embed_shape = None, None
 
 # Load vocabulary
-with open(os.path.join(global_params["dataset_dir"], "vocab_info.pkl"), "rb") as store:
-    vocab_info = pickle.load(store)
+with open(os.path.join(global_params["dataset_dir"], "vocab_info.pkl"), "rb") as stream:
+    vocab_info = pickle.load(stream)
     vocabulary = vocab_info["vocabulary"]
 
 # Gather pretrained word embeddings
 for word in vocabulary:
     if word != word_utils.UNK_token:
-        word_embs[word] = word_utils.word_vector(word)
+        word_embeds[word] = word_utils.word_vector(word)
 
-        if emb_shape is None:
-            emb_shape = word_embs[word].shape
+        if embed_shape is None:
+            embed_shape = word_embeds[word].shape
 
-        if emb_matrix is None:
-            emb_matrix = word_embs[word]
+        if embed_mat is None:
+            embed_mat = word_embeds[word]
         else:
-            emb_matrix = np.vstack((emb_matrix, word_embs[word]))
+            embed_mat = np.vstack((embed_mat, word_embeds[word]))
 
-mean, std = np.mean(emb_matrix, axis=0), np.std(emb_matrix, axis=0)
+mean, std = np.mean(embed_mat, axis=0), np.std(embed_mat, axis=0)
 
 # Generate UNK_token embedding
 dot_product = 1.
-UNK_emb = np.zeros_like(mean)
+UNK_embed = np.zeros_like(mean)
 
 while np.all(np.abs(dot_product) > 0.01):
-    UNK_emb = mean + std * np.random.randn(emb_shape[0])
-    dot_product = np.dot(emb_matrix, UNK_emb)
+    UNK_embed = mean + std * np.random.randn(embed_shape[0])
+    dot_product = np.dot(embed_mat, UNK_embed)
     print(dot_product.shape)
 
-word_embs[word_utils.UNK_token] = UNK_emb
+word_embeds[word_utils.UNK_token] = UNK_embed
 
 # Save pretrained embeddings
-with open(os.path.join(global_params["dataset_dir"], "word2vec_emb.pkl"), "wb") as store:
-    pickle.dump(word_embs, store)
-print("Saved pretrained embeddings info")
+with open(os.path.join(global_params["dataset_dir"], "word2vec_embeds.pkl"), "wb") as stream:
+    pickle.dump(word_embeds, stream)
+print("Save", "word2vec_embeds.pkl")

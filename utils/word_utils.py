@@ -46,7 +46,7 @@ def clean_text(text):
     text = re.sub(r"-+", " ", text)
 
     # Remove punctuations
-    text = "".join([i for i in text if i not in string.punctuation])
+    # text = "".join([i for i in text if i not in string.punctuation])
     # text = re.sub(r"[^0-9A-Za-z\s]", "", text)
 
     # Normalize case
