@@ -15,7 +15,7 @@ dbm._modules = {"dbm.dumb": dumb}
 
 def measure(rid_list, rid2pred_sims, rid2pred_pids, pid2rid):
     # Retrieval metrics over samples (audio or caption instances)
-    rid2pid_R1, rid2pid_R5, rid2pid_R10, rid2pid_mAP = [], [], [], []
+    rid2pid_R1, rid2pid_R5, rid2pid_R10, rid2pid_mAP10 = [], [], [], []
 
     for rind, rid in enumerate(rid_list):
         preds = rid2pred_sims[rind]
@@ -29,20 +29,23 @@ def measure(rid_list, rid2pred_sims, rid2pred_pids, pid2rid):
         recall_at_5 = np.sum(target[:5], dtype=float) / np.sum(target, dtype=float)
         recall_at_10 = np.sum(target[:10], dtype=float) / np.sum(target, dtype=float)
 
-        target = target[:10]
-        positions = np.arange(1, len(target) + 1, dtype=float)[target > 0]
-        avg_precision = np.divide(np.arange(1, len(positions) + 1, dtype=float),
-                                  positions).mean() if len(positions) > 0 else 0.0
-
         rid2pid_R1.append(recall_at_1)
         rid2pid_R5.append(recall_at_5)
         rid2pid_R10.append(recall_at_10)
-        rid2pid_mAP.append(avg_precision)
+
+        positions = np.arange(1, 11, dtype=float)[target[:10] > 0]
+
+        if len(positions) > 0:
+            precisions = np.divide(np.arange(1, len(positions) + 1, dtype=float), positions)
+            avg_precision = np.sum(precisions, dtype=float) / np.sum(target, dtype=float)
+            rid2pid_mAP10.append(avg_precision)
+        else:
+            rid2pid_mAP10.append(0.0)
 
     print("R1: {:.3f}".format(np.mean(rid2pid_R1)),
           "R5: {:.3f}".format(np.mean(rid2pid_R5)),
           "R10: {:.3f}".format(np.mean(rid2pid_R10)),
-          "mAP10: {:.3f}".format(np.mean(rid2pid_mAP)), end="\n")
+          "mAP10: {:.3f}".format(np.mean(rid2pid_mAP10)), end="\n")
 
 
 def predict(conf, ckp_fpath):
