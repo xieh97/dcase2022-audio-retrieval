@@ -1,30 +1,31 @@
 import numpy as np
 import pandas as pd
+from astropy.stats import jackknife
 
 
 def load_clotho_csv(fpath):
-    caption_fname = {}
+    cap2fname = {}
 
     rows = pd.read_csv(fpath)
     rows = [list(row) for row in rows.values]
 
     for row in rows:
         for cap in row[1:]:  # captions
-            caption_fname[cap] = row[0]
+            cap2fname[cap] = row[0]
 
-    return caption_fname
+    return cap2fname
 
 
 def load_output_csv(fpath):
-    caption_fnames = {}
+    cap2fnames = {}
 
     rows = pd.read_csv(fpath)
     rows = [list(row) for row in rows.values]
 
     for row in rows:
-        caption_fnames[row[0]] = row[1:]
+        cap2fnames[row[0]] = row[1:]
 
-    return caption_fnames
+    return cap2fnames
 
 
 def retrieval_metrics(gt_csv, pred_csv):
@@ -53,18 +54,21 @@ def retrieval_metrics(gt_csv, pred_csv):
         else:
             mAP10.append(0.0)
 
-    metrics = {
-        "R1": np.mean(R1),  # 0.03
-        "R5": np.mean(R5),  # 0.11
-        "R10": np.mean(R10),  # 0.19
-        "mAP10": np.mean(mAP10)  # 0.07
-    }
+    # Jackknife estimation with 95% confidence interval on evaluation metrics
+    estimate, bias, std_err, conf_interval = jackknife.jackknife_stats(np.asarray(R1), np.mean, 0.95)
+    print("R1", f"{estimate:.2f}", f"[{conf_interval[0]:.2f}, {conf_interval[1]:.2f}]")
 
-    for key in metrics:
-        print(key, "{:.2f}".format(metrics[key]))
+    estimate, bias, std_err, conf_interval = jackknife.jackknife_stats(np.asarray(R5), np.mean, 0.95)
+    print("R5", f"{estimate:.2f}", f"[{conf_interval[0]:.2f}, {conf_interval[1]:.2f}]")
+
+    estimate, bias, std_err, conf_interval = jackknife.jackknife_stats(np.asarray(R10), np.mean, 0.95)
+    print("R10", f"{estimate:.2f}", f"[{conf_interval[0]:.2f}, {conf_interval[1]:.2f}]")
+
+    estimate, bias, std_err, conf_interval = jackknife.jackknife_stats(np.asarray(mAP10), np.mean, 0.95)
+    print("mAP10", f"{estimate:.2f}", f"[{conf_interval[0]:.2f}, {conf_interval[1]:.2f}]")
 
 
-gt_csv = "test.gt.csv"  # ground truth for Clotho evaluation data
-pred_csv = "test.output.csv"  # baseline system retrieved output for Clotho evaluation data
+gt_csv = "test.gt.csv"  # ground truth for Clotho-evaluation data
+pred_csv = "test.output.csv"  # baseline system retrieved output for Clotho-evaluation data
 
 retrieval_metrics(gt_csv, pred_csv)
