@@ -1,7 +1,21 @@
-# Language-based audio retrieval baseline system for DCASE 2022 Task 6
+## Language-based audio retrieval baseline system for DCASE 2022 Task 6
 
-Welcome to the repository of the language-based audio retrieval baseline system for the **DCASE 2022 challenge**.
-For detailed introduction of this task, please see [this webpage](#).
+Welcome to the repository of the language-based audio retrieval baseline system for **task 6b in DCASE 2022 challenge**.
+For detailed introduction of this task, please see the [task webpage](https://dcase.community/challenge2022/task-language-based-audio-retrieval).
+
+**2022/12/29 Update:**
+The DCASE 2022 Challenge has ended.
+Full challenge results for this task can be found in the [result webpage](https://dcase.community/challenge2022/task-language-based-audio-retrieval-results), and a full summary of the task submissions can be found in [our paper](https://arxiv.org/abs/2206.06108):
+
+```
+@InProceedings{Xie2022Language,
+    author = {Xie, Huang and Lipping, Samuel and Virtanen, Tuomas},
+    title = {Language-Based Audio Retrieval Task in {DCASE} 2022 Challenge},
+    booktitle = {Proceedings of the 7th Workshop on Detection and Classification of Acoustic Scenes and Events (DCASE)},
+    year = {2022},
+    pages = {216-220}
+}
+```
 
 This repository includes:
 
