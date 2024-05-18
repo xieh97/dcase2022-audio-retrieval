@@ -48,7 +48,7 @@ For the **triplet ranking loss** used to train the baseline system, please see:
 _J. Bromley, I. Guyon, Y. LeCun, E. Säckinger, and R. Shah, “Signature Verification Using a ‘Siamese’ Time Delay Neural Network,” in Proceedings of the 6th International Conference on Neural Information Processing Systems, 1993, pp. 737–744._
 
 
-## Getting started
+## Code Tutorial
 
 This repository is developed with Python 3.8.
 
